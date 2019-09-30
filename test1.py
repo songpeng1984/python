@@ -18,7 +18,6 @@ from pymongo import MongoClient
 import warnings
 import json
 from flask import Flask, request
-from multiprocessing import Pool
 import threading
 
 server = Flask(__name__)
@@ -32,9 +31,81 @@ try:
     log = db.invtlog
     invetfile = db.invetfile
     excepinvet = db.excepinvet
+    homedata = db.homedata
     # set = db.Checklist  # 特殊监管区域核注清单集合 富斯捷
 except:
     print("mnongo连接失败")
+
+
+def catchData():
+    global timer
+    maoyie = 0.0
+    goodslist = set()
+    b_goodslist = set()
+    entlist = []
+    dclqty = 0
+    i = 0
+    e = 0
+    ii = 0
+    ee = 0
+    b_maoyie = 0.0  # 报关单的贸易额
+    client_list = set()  # 收发货人（）家
+    for name in user.find({}, {'name': 1, '_id': 0}):
+        name=name['name']
+        # if list(user.find({'name': name})) != []:
+        # num = sasdetails.aggregate({"$match":{"account":{"$eq":name}}})
+        # print(type(num))
+        num = sasdetails.find({"account": name}).count()  # 核注清单
+
+        b_num = invetfile.find({"account": name}).count()
+        z_num = sasdetails.find({'account': name, 'dataTime': str(datetime.date.today() - datetime.timedelta(days=1)).replace("-", "")}).count()
+        bz_num = invetfile.find({'account': name, 'dataTime': str(datetime.date.today() - datetime.timedelta(days=1))}).count()
+        for c in invetfile.find({'account': name}, {'ownerName': 1, '_id': 0}):
+            client_list.add(c['ownerName'])
+
+        # for b_ie in invetfile.find({'account': name}, {'_id': 0, 'ciqIEFlag': 1}):
+        #     if b_ie['ciqIEFlag'] == 'I':
+        #         ii = ii + 1
+        #     else:
+        #         ee = ee + 1
+        ii = invetfile.find({'account': name, 'ciqIEFlag': 'I'}).count()
+        ee = invetfile.find({'account': name, 'ciqIEFlag': 'E'}).count()
+
+        for ie in sasdetails.find({'account': name}, {'_id': 0, 'invtHeadType': 1}):
+            for iore in ie['invtHeadType']['impexpMarkcd']:
+                if iore == 'I':
+                    i = i + 1
+                else:
+                    e = e + 1
+
+        for en in user.find({'name': name}, {'_id': 0, 'entNo': 1}):
+            if ',' in en['entNo']:
+                entlist = en['entNo'].split(',')
+            else:
+                entlist = ['1']
+
+        for invtHeadType in sasdetails.find({'account': name}, {'_id': 0, 'invtListType': 1}):
+            for totalAmt in invtHeadType['invtListType']:
+                goodslist.add(totalAmt['gdecd'])
+                maoyie = maoyie + float(totalAmt['dclTotalAmt'])
+                dclqty = dclqty + int(totalAmt['dclQty'])
+
+        for decMergeListVo in invetfile.find({'account': name}, {'_id': 0, 'decMergeListVo': 1}):
+            for declTotal in eval(decMergeListVo['decMergeListVo']):
+                # print(declTotal['declTotal'])
+                b_goodslist.add(declTotal['codeTs'])
+                b_maoyie = b_maoyie + float(declTotal['declTotal'])
+
+        homedata.insert(
+            {'numz': num + b_num, 'maoyie': maoyie + b_maoyie, 'goodsnum': len(goodslist) + len(b_goodslist), 'entnum': len(entlist), 'z_num': z_num, 'hi': i,
+             'he': e, 'bi': ii, 'be': ee, 'bz_num': bz_num, 'name': name, 'sr': len(client_list)})
+        # num:总单量   maoyie：总贸易额 goodsnum：总贸易商品  entnum：授权企业数量 z_num：昨日单量 hi：核注清单进口量  he：核注清单出口量
+        # return {'numz': num + b_num, 'maoyie': maoyie + b_maoyie, 'goodsnum': len(goodslist) + len(b_goodslist), 'entnum': len(entlist),
+        #         'z_num': z_num,
+        # 'hi': i, 'he': e, 'bi': ii, 'be': ee, 'sr': len(client_list), 'bz_num': bz_num, 'client': client_list}
+    timer = threading.Timer(600, catchData)
+    timer.start()
+
 
 # auth = {'8950000063362': 'aA666666', '2100030014039': 'dsy123456'}
 APP_ID = '5dc8fb00f81c4b72b2ec483c6ca3ede9'
@@ -147,50 +218,66 @@ def search_data():
     client_list = set()  # 收发货人（）家
     if request.method == 'POST':
         name = request.values.get('name')
-        passwd = request.values.get('passwd')
-        if list(user.find({}, {'account': name, 'passwd': passwd})) != []:
-            num = len(list(sasdetails.find({}, {'account': name})))
-            b_num = len(list(invetfile.find({}, {'account': name})))
-            z_num = len(list(sasdetails.find({}, {'account': name, 'dataTime': str(datetime.date.today() - datetime.timedelta(days=1)).replace("-", "")})))
-            bz_num = len(list(invetfile.find({}, {'account': name, 'dataTime': str(datetime.date.today() - datetime.timedelta(days=1))})))
-            for sr in invetfile.find({}, {'account': name, 'ownerName': 1}):
-                client_list.add(sr['ownerName'])
+        # passwd = request.values.get('passwd')
+        if list(user.find({'name': name})) != []:
+            # num = sasdetails.aggregate({"$match":{"account":{"$eq":name}}})
+            # print(type(num))
+            num = sasdetails.find({"account": name}).count()  # 核注清单
 
-            for b_ie in invetfile.find({}, {'account': name, 'ciqIEFlag': 1}):
-                if b_ie['ciqIEFlag'] == 'I':
-                    ii = ii + 1
-                else:
-                    ee = ee + 1
-            for ie in sasdetails.find({}, {'account': name, 'invtHeadType': 1}):
+            b_num = invetfile.find({"account": name}).count()
+            z_num = sasdetails.find({'account': name, 'dataTime': str(datetime.date.today() - datetime.timedelta(days=1)).replace("-", "")}).count()
+            bz_num = invetfile.find({'account': name, 'dataTime': str(datetime.date.today() - datetime.timedelta(days=1))}).count()
+            for c in invetfile.find({'account': name}, {'ownerName': 1, '_id': 0}):
+                client_list.add(c['ownerName'])
+
+            # for b_ie in invetfile.find({'account': name}, {'_id': 0, 'ciqIEFlag': 1}):
+            #     if b_ie['ciqIEFlag'] == 'I':
+            #         ii = ii + 1
+            #     else:
+            #         ee = ee + 1
+            ii = invetfile.find({'account': name, 'ciqIEFlag': 'I'}).count()
+            ee = invetfile.find({'account': name, 'ciqIEFlag': 'E'}).count()
+
+            for ie in sasdetails.find({'account': name}, {'_id': 0, 'invtHeadType': 1}):
                 for iore in ie['invtHeadType']['impexpMarkcd']:
                     if iore == 'I':
                         i = i + 1
                     else:
                         e = e + 1
 
-            for en in user.find({}, {'account': name, 'entNo': 1}):
+            for en in user.find({'name': name}, {'_id': 0, 'entNo': 1}):
                 if ',' in en['entNo']:
                     entlist = en['entNo'].split(',')
                 else:
                     entlist = ['1']
 
-            for invtHeadType in sasdetails.find({}, {'account': name, 'invtListType': 1}):
+            for invtHeadType in sasdetails.find({'account': name}, {'_id': 0, 'invtListType': 1}):
                 for totalAmt in invtHeadType['invtListType']:
                     goodslist.add(totalAmt['gdecd'])
                     maoyie = maoyie + float(totalAmt['dclTotalAmt'])
                     dclqty = dclqty + int(totalAmt['dclQty'])
 
-            for decMergeListVo in invetfile.find({}, {'account': name, 'decMergeListVo': 1}):
+            for decMergeListVo in invetfile.find({'account': name}, {'_id': 0, 'decMergeListVo': 1}):
                 for declTotal in eval(decMergeListVo['decMergeListVo']):
                     # print(declTotal['declTotal'])
                     b_goodslist.add(declTotal['codeTs'])
-                    b_maoyie = b_maoyie + float(declTotal['goodsToalVal'])
-
+                    b_maoyie = b_maoyie + float(declTotal['declTotal'])
+            homedata.insert({'numz': num + b_num, 'maoyie': maoyie + b_maoyie, 'goodsnum': len(goodslist) + len(b_goodslist),
+                             'entnum': len(entlist), 'z_num': z_num,
+                             'hi': i, 'he': e, 'bi': ii, 'be': ee, 'sr': len(client_list), 'bz_num': bz_num, 'client': client_list})
             # num:总单量   maoyie：总贸易额 goodsnum：总贸易商品  entnum：授权企业数量 z_num：昨日单量 hi：核注清单进口量  he：核注清单出口量
             return {'numz': num + b_num, 'maoyie': maoyie + b_maoyie, 'goodsnum': len(goodslist) + len(b_goodslist), 'entnum': len(entlist), 'z_num': z_num,
-                    'hi': i, 'he': e, 'bi': ii, 'be': ee, 'sr': len(client_list), 'bz_num': bz_num}
+                    'hi': i, 'he': e, 'bi': ii, 'be': ee, 'sr': len(client_list), 'bz_num': bz_num, 'client': client_list, 'name': name}
         else:
             return {'code': 1, 'message': '登录失败,请确认用户名和密码'}
+
+
+# if user.find().count() == 0:
+#     print('用户空集合')
+# else:
+#     names = user.find({}, {'name': 1, '_id': 0})
+#     for u in names:
+#         search_data(u)
 
 
 @server.route('/pz', methods=['POST'])
@@ -593,10 +680,6 @@ def loadData():
                     kk.join()
                     print('线程{}执行收敛'.format(kk))
 
-            # pool.map(print_test, r)
-            # pool.close()
-            # pool.join()
-
             break
         print("------------------------")
         print("登陆失败，继续登陆")
@@ -606,6 +689,10 @@ def loadData():
     return {'code': 0, 'message': '保存成功,开始获取当前数据'}
 
 
+timer = threading.Timer(2, catchData)
+timer.start()
+
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
+
     server.run(debug=True, host='127.0.0.1', port='12345')
